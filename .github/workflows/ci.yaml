@@ -1,0 +1,55 @@
+
+name: "CI"
+on:
+  push:
+    branches:
+      - "main"
+env:
+  RUST_VERSION: "1.98.1"
+  RUST_TARGET: "wasm32-wasip2"
+jobs:
+  spin:
+    runs-on: "ubuntu-latest"
+    name: Build Spin App
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "${{ env.RUST_VERSION }}"
+          targets: "${{ env.RUST_TARGET }}"
+      - name: Install Spin
+        uses: fermyon/actions/spin/setup@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build my-app
+        run: spin build
+        working-directory: .
+      - name: Install the aka Plugin for Spin
+        run: spin plugins update && spin plugins install aka --yes
+      - name: Login to Akamai Functions
+        run: spin aka login --token ${{ secrets.AKAMAI_FUNCTIONS_TOKEN }}
+      - name: Check if recurring App Deployment (my-app)
+        id: check-for-existing-app-MY_APP
+        run: |
+          if spin aka apps list --account-id ${{ secrets.AKAMAI_FUNCTIONS_ACCOUNT_ID }} | grep -xF "my-app" > /dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "App my-app found."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "App my-app not found."
+          fi
+      - name: Link to existing (my-app) App Deployment
+        if: steps.check-for-existing-app-MY_APP.outputs.exists == 'true'
+        working-directory: .
+        run: spin aka app link --app-name my-app --account-id ${{ secrets.AKAMAI_FUNCTIONS_ACCOUNT_ID }}
+      - name: Deploying my-app to Akamai Functions
+        if: steps.check-for-existing-app-MY_APP.outputs.exists == 'false'
+        working-directory: .
+        run: spin aka deploy --account-id ${{ secrets.AKAMAI_FUNCTIONS_ACCOUNT_ID }} --create-name my-app --no-confirm --skip-readiness-check
+      - name: ReDeploying my-app to Akamai Functions
+        if: steps.check-for-existing-app-MY_APP.outputs.exists == 'true'
+        working-directory: .
+        run: spin aka deploy --account-id ${{ secrets.AKAMAI_FUNCTIONS_ACCOUNT_ID }} --no-confirm --skip-readiness-check
